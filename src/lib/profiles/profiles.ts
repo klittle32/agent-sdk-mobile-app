@@ -15,6 +15,7 @@ import {
   revokeOAuthCredential,
   type OAuthCredential,
 } from "../auth/oauthTokens";
+import type { StoredComputer } from "../letta/computerRouting";
 
 export type ProfileType = "cloud" | "remote";
 export type CloudAuthMethod = "oauth" | "api_key";
@@ -27,6 +28,11 @@ export interface Profile {
   url: string;
   /** Existing Cloud profiles omit this field and remain API-key profiles. */
   authMethod?: CloudAuthMethod;
+  /**
+   * Cloud only. Which computer sessions execute on. Absent means the SDK
+   * sandbox. Stored on the profile because computers belong to the account.
+   */
+  computer?: StoredComputer;
   /** Result of the last "Test connection" run. */
   lastTest?: "ok" | "unauthorized" | "unreachable";
   createdAt: number;

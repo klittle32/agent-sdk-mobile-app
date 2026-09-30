@@ -21,7 +21,9 @@ import { createTranscriptAccumulator } from "@letta-ai/letta-agent-sdk/client";
 
 import { toImageContent, type Attachment } from "./attachments";
 import type { Profile } from "../profiles/profiles";
-import { getConversationModel, isAuthError, listConversationMessages, sdkClient } from "./api";
+import { getConversationModel, isAuthError, listComputers, listConversationMessages, sdkClient } from "./api";
+import { computerForSession } from "./computerRouting";
+import { ExternalTranscriptStore } from "./ExternalTranscriptStore";
 import { emptyChat, type ApprovalRequest, type ChatSnapshot, type PermissionMode, type ToolStatus, type TranscriptItem } from "./model";
 import { patch } from "./mockSession";
 import { contentToText, formatToolInput } from "./toolText";
@@ -120,6 +122,9 @@ export class ChatSession {
   private nextBefore: string | null = null;
   private pendingStream: SDKMessage[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Polls REST so a run started on another client appears in an open chat. */
+  private externalTimer: ReturnType<typeof setInterval> | null = null;
+  private externalStore = new ExternalTranscriptStore();
   private counter = 0;
   /** Attachments behind pending local echoes, so retry re-sends the images too. */
   private pendingAttachments = new Map<string, Attachment[]>();
@@ -149,16 +154,18 @@ export class ChatSession {
   }
 
   /** Create the SDK session on demand and start consuming its stream. */
-  private ensureSession(): LettaCodeSession {
+  private async ensureSession(): Promise<LettaCodeSession> {
     if (this.session) return this.session;
     const client = sdkClient(this.conn);
-    // Cloud sessions execute in an SDK-managed sandbox (the SDK default).
-    // TODO(sdk) BUG: routing to an online environment via
-    // resumeSession(id, { environment }) fails against production — cloud-api
-    // closes the status socket with 1013 "Listener connection unavailable"
-    // when the SDK sends runtime_start, even with the listener online (see
-    // SDK-FEEDBACK.md). Re-enable pickCloudEnvironment() once fixed.
+    // A saved computer is resolved to a current online lease. Offline or
+    // unknown falls back to the SDK sandbox rather than failing the send.
+    // Pass `computer`, not the deprecated `environment` option.
+    const computer =
+      this.conn.profile.type === "cloud"
+        ? computerForSession(this.conn.profile.computer, await listComputers(this.conn).catch(() => []))
+        : undefined;
     this.session = client.resumeSession(this.conversationId, {
+      ...(computer ? { computer } : {}),
       // Tool approvals surface as an ApprovalRequest in the snapshot; the
       // ApprovalCard resolves it via resolveApproval(). The run stays in
       // awaiting_approval until the user decides.
@@ -209,7 +216,7 @@ export class ChatSession {
     try {
       // The SDK takes either a string or a multimodal content array; images
       // lead so the model reads them as context for the instruction.
-      await this.ensureSession().send(
+      await (await this.ensureSession()).send(
         attachments.length > 0
           ? [...toImageContent(attachments), ...(text ? [{ type: "text" as const, text }] : [])]
           : text,
@@ -428,7 +435,7 @@ export class ChatSession {
 
   /** Change the conversation model/effort through the session (first-class SDK API). */
   async setModel(model: string, reasoningEffort?: string): Promise<void> {
-    await this.ensureSession().updateModel({
+    await (await this.ensureSession()).updateModel({
       modelHandle: model,
       ...(reasoningEffort ? { reasoningEffort: reasoningEffort as never } : {}),
     });
@@ -436,7 +443,7 @@ export class ChatSession {
 
   /** Change the runtime permission mode (SDK 0.3.0 #208 write, 0.3.1 #212 read). */
   async setPermissionMode(mode: PermissionMode): Promise<void> {
-    await this.ensureSession().changeDeviceState({ permissionMode: mode });
+    await (await this.ensureSession()).changeDeviceState({ permissionMode: mode });
     // The authoritative value lands via the next device-status update; show
     // the pending value immediately so the sheet feels responsive.
     this.commit(
@@ -573,6 +580,29 @@ export class ChatSession {
     }
   }
 
+  /**
+   * While a chat is open and this phone is not in a turn, pull the latest
+   * history so a run started on another computer shows up here.
+   */
+  private startExternalWatch(): void {
+    if (this.externalTimer || this.closed) return;
+    this.externalTimer = setInterval(() => {
+      if (this.closed) return;
+      if (this.snapshot.run === "running" || this.snapshot.run === "awaiting_approval") return;
+      void this.pullExternal();
+    }, 4_000);
+  }
+
+  private async pullExternal(): Promise<void> {
+    try {
+      const page = await this.fetchHistoryPage();
+      const changed = this.externalStore.upsert(page.messages as never);
+      if (changed > 0 && !this.closed) this.commit(this.project(this.snapshot));
+    } catch {
+      // The next tick retries. A missed poll is not a chat failure.
+    }
+  }
+
   close(): void {
     this.closed = true;
     this.accumulator.reset();
@@ -584,6 +614,11 @@ export class ChatSession {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
     }
+    if (this.externalTimer) {
+      clearInterval(this.externalTimer);
+      this.externalTimer = null;
+    }
+    this.externalStore.clear();
     this.pendingStream = [];
     this.session?.close();
     this.listeners.clear();
@@ -637,6 +672,7 @@ export class ChatSession {
       this.commit(
         this.project(patch(this.snapshot, { hydrating: false, hasMore: page.hasMore })),
       );
+      this.startExternalWatch();
       // An approval left pending across a disconnect (or a previous app run)
       // re-delivers through canUseTool, resurfacing the ApprovalCard instead
       // of deadlocking the run. Best-effort: older servers lack the command,
@@ -698,7 +734,7 @@ export class ChatSession {
     // the first paint stays cheap and older pages arrive on scroll.
     const limit = 50;
     if (this.conn.profile.type === "remote") {
-      const result = await this.ensureSession().listMessages({ limit, ...(before ? { before } : {}) });
+      const result = await (await this.ensureSession()).listMessages({ limit, ...(before ? { before } : {}) });
       const messages = result.messages.slice().reverse();
       const oldestId = (messages[0] as { id?: string } | undefined)?.id ?? null;
       const full = result.messages.length >= limit;
@@ -831,6 +867,10 @@ export class ChatSession {
     // still belong at the end rather than disappearing.
     for (const { anchor, item } of this.localRows) {
       if (anchor > placed) transcript.push(item);
+    }
+    const seen = new Set(transcript.map((item) => item.id));
+    for (const { item } of this.externalStore.itemsWithDatesRev()) {
+      if (!seen.has(item.id)) transcript.push(item);
     }
     return patch(snapshot, { transcript });
   }

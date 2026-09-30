@@ -5,6 +5,7 @@
  * confirmed); the send button morphs into stop.
  */
 import type { BottomSheetModal } from "@gorhom/bottom-sheet";
+import { setStringAsync as copyToClipboard } from "expo-clipboard";
 import { router, useLocalSearchParams } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -24,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ApprovalCard } from "../components/chat/ApprovalCard";
 import { ConnectionBanner } from "../components/chat/Banner";
+import { EnvironmentSheet } from "../components/chat/EnvironmentSheet";
 import { ModelSheet } from "../components/chat/ModelSheet";
 import { QueueCapsule } from "../components/chat/QueueCapsule";
 import { QueueSheet } from "../components/chat/QueueSheet";
@@ -49,11 +51,15 @@ import { ChatSession } from "../lib/letta/ChatSession";
 import {
   getConversationModel,
   isAuthError,
+  listComputers,
   listModels,
+  renameConversation,
   updateConversationModel,
+  type ComputerSummary,
   type ModelOption,
   type ReasoningEffort,
 } from "../lib/letta/api";
+import { environmentLabel } from "../lib/letta/computerRouting";
 import {
   emptyChat,
   type ChatSnapshot,
@@ -63,7 +69,7 @@ import {
 } from "../lib/letta/model";
 import { groupToolRuns, type TranscriptRowItem } from "../lib/letta/grouping";
 import { pickImages, type Attachment } from "../lib/letta/attachments";
-import { getSecret } from "../lib/profiles/profiles";
+import { getSecret, saveProfile } from "../lib/profiles/profiles";
 import { useProfiles } from "../lib/profiles/ProfilesContext";
 import { useTheme } from "../theme/ThemeProvider";
 import { motion, radius, space } from "../theme/tokens";
@@ -119,7 +125,7 @@ export default function ChatScreen() {
   const params = useLocalSearchParams<{ conversationId: string; agentId: string; agentName?: string; title?: string; autosend?: string }>();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { activeProfile } = useProfiles();
+  const { activeProfile, refresh: refreshProfiles } = useProfiles();
 
   const sessionRef = useRef<ChatSession | null>(null);
   const listRef = useRef<FlatList<TranscriptRowItem>>(null);
@@ -230,6 +236,13 @@ export default function ChatScreen() {
   const [effort, setEffort] = useState<string | null>(null);
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
+  const envSheetRef = useRef<BottomSheetModal>(null);
+  const settingsSheetRef = useRef<BottomSheetModal>(null);
+  const [settingsTitle, setSettingsTitle] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [computers, setComputers] = useState<ComputerSummary[]>([]);
+  const [envLoading, setEnvLoading] = useState(false);
+  const [envError, setEnvError] = useState<string | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState<"allow" | "deny" | undefined>();
 
   // Tool detail sheet: track the id, not the item — the open sheet keeps
@@ -341,6 +354,31 @@ export default function ChatScreen() {
       }
     }
   }, [activeProfile, models.length]);
+
+  const openEnvSheet = useCallback(async () => {
+    if (!activeProfile || activeProfile.type !== "cloud") return;
+    setEnvError(null);
+    envSheetRef.current?.present();
+    setEnvLoading(true);
+    try {
+      const secret = (await getSecret(activeProfile.id)) ?? "";
+      setComputers(await listComputers({ profile: activeProfile, secret }));
+    } catch {
+      setEnvError("Couldn't load environments.");
+    } finally {
+      setEnvLoading(false);
+    }
+  }, [activeProfile]);
+
+  const selectEnvironment = useCallback(
+    async (computer: { deviceId: string; name: string } | null) => {
+      if (!activeProfile) return;
+      const secret = await getSecret(activeProfile.id);
+      await saveProfile({ ...activeProfile, computer: computer ?? undefined }, secret);
+      await refreshProfiles();
+    },
+    [activeProfile, refreshProfiles],
+  );
 
   const selectModel = useCallback(
     async (handle: string, nextEffort?: ReasoningEffort) => {
@@ -478,6 +516,14 @@ export default function ChatScreen() {
       <Header
         title={title}
         back
+        trailing={
+          <Touchable accessibilityRole="button" accessibilityLabel="Conversation settings" onPress={() => {
+            setSettingsTitle(title);
+            settingsSheetRef.current?.present();
+          }}>
+            <Text role="title" ink={2}>⚙</Text>
+          </Touchable>
+        }
         subtitle={
           <View style={styles.statusRow}>
             <Text role="sub" ink={2}>
@@ -665,6 +711,18 @@ export default function ChatScreen() {
                 {!modelSaving && effort ? ` · ${effort}` : ""}
               </Text>
             </Touchable>
+            {activeProfile?.type === "cloud" ? (
+              <Touchable
+                accessibilityRole="button"
+                accessibilityLabel={`Environment: ${environmentLabel(activeProfile.computer)}. Change environment`}
+                onPress={() => void openEnvSheet()}
+                style={styles.modelChip}
+              >
+                <Text role="sub" ink={2} mono numberOfLines={1}>
+                  {environmentLabel(activeProfile.computer)}
+                </Text>
+              </Touchable>
+            ) : null}
             {snapshot.device ? (
               <Touchable
                 accessibilityRole="button"
@@ -777,6 +835,63 @@ export default function ChatScreen() {
         ) : null}
       </Sheet>
       <ToolDetailSheet ref={toolSheetRef} tool={detailTool} />
+      <Sheet ref={settingsSheetRef} title="Conversation" scroll>
+        <TextInput
+          value={settingsTitle}
+          onChangeText={setSettingsTitle}
+          placeholder="Conversation title"
+          placeholderTextColor={colors.ink3}
+          style={[styles.settingsInput, { color: colors.ink, borderColor: colors.surfaceEdge }]}
+        />
+        <Touchable
+          accessibilityRole="button"
+          accessibilityLabel="Rename conversation"
+          onPress={() => {
+            const next = settingsTitle.trim();
+            if (!activeProfile || !params.conversationId || !next || next === title) return;
+            void (async () => {
+              const secret = (await getSecret(activeProfile.id)) ?? "";
+              await renameConversation({ profile: activeProfile, secret }, params.conversationId, next);
+              setServerTitle(next);
+              settingsSheetRef.current?.dismiss();
+            })();
+          }}
+        >
+          <Text role="sub" tone="accent">Rename</Text>
+        </Touchable>
+        {[
+          ["Conversation ID", params.conversationId],
+          ["Agent ID", params.agentId],
+        ].map(([label, value]) => (
+          <Touchable
+            key={label}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}. Tap to copy`}
+            onPress={() => {
+              if (!value) return;
+              void copyToClipboard(value).then(() => {
+                setCopiedId(label ?? null);
+                setTimeout(() => setCopiedId(null), 1200);
+              });
+            }}
+            style={styles.idRow}
+          >
+            <Text role="sub" ink={3}>{label}</Text>
+            <Text role="sub" ink={2} mono numberOfLines={1} style={styles.idValue}>{value}</Text>
+            <Text role="sub" tone={copiedId === label ? "accent" : undefined} ink={copiedId === label ? undefined : 3}>
+              {copiedId === label ? "Copied" : "Copy"}
+            </Text>
+          </Touchable>
+        ))}
+      </Sheet>
+      <EnvironmentSheet
+        ref={envSheetRef}
+        computers={computers}
+        selectedDeviceId={activeProfile?.computer?.deviceId ?? null}
+        onSelect={(computer) => void selectEnvironment(computer)}
+        loading={envLoading}
+        error={envError}
+      />
       <ModelSheet
         ref={modelSheetRef}
         models={models}
@@ -791,6 +906,15 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  settingsInput: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.row,
+    paddingHorizontal: space.md,
+    paddingVertical: 9,
+    fontSize: 16,
+  },
+  idRow: { flexDirection: "row", alignItems: "center", gap: space.sm, minHeight: 40 },
+  idValue: { flex: 1 },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   // Inverted list: style paddingTop renders at the VISUAL bottom (above the
   // composer), paddingBottom at the visual top.

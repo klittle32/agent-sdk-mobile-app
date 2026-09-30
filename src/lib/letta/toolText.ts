@@ -4,8 +4,8 @@
  * user messages carry system-reminder wrappers no one should read.
  */
 
-export /** Strip harness wrappers (system reminders) from user-visible message text. */
-function cleanUserText(text: string): string {
+/** Strip harness wrappers (system reminders) from user-visible message text. */
+export function cleanUserText(text: string): string {
   return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
 }
 
@@ -54,8 +54,8 @@ export function summarizeToolInput(input: unknown): string {
   }
 }
 
-export /** Full payload for the detail sheet — pretty JSON, JSON-encoded strings unwrapped. */
-function formatToolInput(input: unknown): string | undefined {
+/** Full payload for the detail sheet — pretty JSON, JSON-encoded strings unwrapped. */
+export function formatToolInput(input: unknown): string | undefined {
   if (input == null) return undefined;
   if (typeof input === "string") {
     try {

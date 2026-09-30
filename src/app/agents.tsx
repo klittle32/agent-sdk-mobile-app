@@ -7,6 +7,8 @@
 import type { BottomSheetModal } from "@gorhom/bottom-sheet";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Image } from "expo-image";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Alert, FlatList, RefreshControl, StyleSheet, TextInput, View } from "react-native";
 
 import { Bloop } from "../components/ui/Bloop";
@@ -17,10 +19,12 @@ import { SkeletonList } from "../components/ui/Skeleton";
 import { StatusDot } from "../components/ui/StatusDot";
 import { Text } from "../components/ui/Text";
 import { Touchable } from "../components/ui/Touchable";
+import { loadPinned, pinFirst, pinnedAgentsKey, togglePinned } from "../lib/favorites";
 import { haptic } from "../lib/haptics";
 import {
   createAgent,
   deleteAgent,
+  fetchAgentProfilePicture,
   listAgents,
   listModels,
   updateAgent,
@@ -49,7 +53,19 @@ function shortModel(model: string): string {
   return model.includes("/") ? model.split("/").slice(1).join("/") : model;
 }
 
-function AgentRow({ agent, onPress, onLongPress }: { agent: AgentSummary; onPress: () => void; onLongPress: () => void }) {
+function AgentRow({
+  agent,
+  pinned,
+  avatarUrl,
+  onPress,
+  onLongPress,
+}: {
+  agent: AgentSummary;
+  pinned?: boolean;
+  avatarUrl?: string;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
   const { colors } = useTheme();
   return (
     <Touchable
@@ -61,9 +77,14 @@ function AgentRow({ agent, onPress, onLongPress }: { agent: AgentSummary; onPres
       style={styles.row}
     >
       <View style={styles.rowInner}>
-        <Bloop id={agent.id} />
+        {avatarUrl ? (
+          <Image source={{ uri: avatarUrl }} style={styles.avatar} contentFit="cover" />
+        ) : (
+          <Bloop id={agent.id} />
+        )}
         <View style={styles.rowText}>
           <Text role="bodyEm" numberOfLines={1}>
+            {pinned ? "★ " : ""}
             {agent.name}
           </Text>
           <View style={styles.meta}>
@@ -85,6 +106,8 @@ export default function AgentsScreen() {
   const { colors } = useTheme();
   const { activeProfile } = useProfiles();
   const [agents, setAgents] = useState<AgentSummary[] | null>(null);
+  const [pinned, setPinned] = useState<Set<string>>(new Set());
+  const [avatars, setAvatars] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
@@ -105,6 +128,19 @@ export default function AgentsScreen() {
       const list = await listAgents({ profile: activeProfile, secret });
       loadedAt.current = Date.now();
       setAgents(list);
+      if (activeProfile) {
+        void loadPinned(pinnedAgentsKey(activeProfile.id)).then(setPinned);
+        void Promise.all(
+          list.slice(0, 30).map(async (agent) => {
+            const cached = await AsyncStorage.getItem(`letta.avatar.${agent.id}`);
+            if (cached) setAvatars((current) => ({ ...current, [agent.id]: cached }));
+            const fresh = await fetchAgentProfilePicture({ profile: activeProfile, secret }, agent.id);
+            if (!fresh) return;
+            await AsyncStorage.setItem(`letta.avatar.${agent.id}`, fresh.dataUrl);
+            setAvatars((current) => ({ ...current, [agent.id]: fresh.dataUrl }));
+          }),
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load agents.");
       setAgents((prev) => prev ?? []);
@@ -194,13 +230,23 @@ export default function AgentsScreen() {
 
   const showActions = (agent: AgentSummary) => {
     Alert.alert(agent.name, undefined, [
+      {
+        text: pinned.has(agent.id) ? "Unpin" : "Pin to top",
+        onPress: () => {
+          if (!activeProfile) return;
+          void togglePinned(pinnedAgentsKey(activeProfile.id), agent.id).then(setPinned);
+        },
+      },
       { text: "Rename", onPress: () => openEdit(agent) },
       { text: "Delete", style: "destructive", onPress: () => confirmDelete(agent) },
       { text: "Cancel", style: "cancel" },
     ]);
   };
 
-  const filtered = (agents ?? []).filter((a) => a.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = pinFirst(
+    (agents ?? []).filter((a) => a.name.toLowerCase().includes(search.toLowerCase())),
+    pinned,
+  );
   const canSubmit = editing ? draftName.trim().length > 0 : draftModel !== null;
 
   return (
@@ -254,6 +300,8 @@ export default function AgentsScreen() {
           renderItem={({ item }) => (
             <AgentRow
               agent={item}
+              pinned={pinned.has(item.id)}
+              avatarUrl={avatars[item.id]}
               onPress={() => router.push({ pathname: "/conversations", params: { agentId: item.id, agentName: item.name } })}
               onLongPress={() => showActions(item)}
             />
@@ -343,6 +391,7 @@ export default function AgentsScreen() {
 const styles = StyleSheet.create({
   list: { paddingBottom: space.xxl, flexGrow: 1 },
   row: { paddingHorizontal: space.gutter },
+  avatar: { width: 40, height: 40, borderRadius: 20 },
   rowInner: { flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: 14 },
   rowText: { flex: 1, gap: 2 },
   meta: { flexDirection: "row", alignItems: "center", gap: space.xs },

@@ -4,13 +4,13 @@
  * As of SDK 0.3.1 everything here rides the portable client's first-class
  * APIs (`client.agents.*`, `client.conversations.*`, `client.models.*`,
  * `client.createAgent`) — identical on cloud and remote. The only raw REST
- * left is `pickCloudEnvironment` (environments listing has no SDK surface;
- * currently unused: environment routing closes the status socket with 1013,
- * see letta-cloud#13382).
+ * left is `pickCloudEnvironment` (unused). Session routing uses
+ * `client.computers` and `resumeSession({ computer })` instead.
  */
 import { LettaAgentClient, createReactNativeWebSocketConstructor } from "@letta-ai/letta-agent-sdk/client";
 import type {
   UpdateConversationOptions,
+  Computer,
   LettaAgent,
   LettaCodeModelEntry,
   LettaConversation,
@@ -168,6 +168,48 @@ export async function deleteAgent(conn: Connection, agentId: string): Promise<vo
  * that's the "chat with the agent on my homeserver" case and avoids spinning
  * a sandbox. Otherwise return undefined and let the SDK manage a sandbox.
  */
+export interface ComputerSummary {
+  deviceId: string;
+  name: string;
+  connectionId: string | null;
+  status: "online" | "offline";
+}
+
+function toComputerSummary(record: Computer): ComputerSummary {
+  return {
+    deviceId: record.deviceId,
+    name: record.name,
+    connectionId: record.connectionId,
+    status: record.status,
+  };
+}
+
+/** Computers registered on this Letta Cloud account. Remote profiles have one server. */
+export interface AgentProfilePicture {
+  dataUrl: string;
+  commitSha: string | null;
+}
+
+/** Agent profile.png. Decoration only — missing or failed fetches return null. */
+export async function fetchAgentProfilePicture(conn: Connection, agentId: string): Promise<AgentProfilePicture | null> {
+  if (conn.profile.type !== "cloud") return null;
+  try {
+    const body = (await cloudFetch(conn, `/v1/agents/${encodeURIComponent(agentId)}/profile-picture`, {
+      headers: { Accept: "application/json" },
+    })) as { data_url?: string; commit_sha?: string | null };
+    if (!body?.data_url) return null;
+    return { dataUrl: body.data_url, commitSha: body.commit_sha ?? null };
+  } catch {
+    return null;
+  }
+}
+
+export async function listComputers(conn: Connection): Promise<ComputerSummary[]> {
+  if (conn.profile.type !== "cloud") return [];
+  const result = await sdkClient(conn).computers.list({ limit: 50 });
+  return result.computers.map(toComputerSummary);
+}
+
 export async function pickCloudEnvironment(conn: Connection): Promise<{ connectionId: string } | undefined> {
   if (conn.profile.type !== "cloud") return undefined;
   try {

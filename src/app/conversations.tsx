@@ -23,6 +23,7 @@ import {
   renameConversation,
   type ConversationSummary,
 } from "../lib/letta/api";
+import { loadPinned, pinFirst, pinnedConversationsKey, togglePinned } from "../lib/favorites";
 import {
   conversationActivity,
   subscribeConversationActivity,
@@ -52,8 +53,9 @@ function useActivity(conversationId: string): ConversationActivity | null {
   return useSyncExternalStore(subscribeConversationActivity, read);
 }
 
-function ConversationRow({ conversation, onPress, onLongPress }: {
+function ConversationRow({ conversation, pinned, onPress, onLongPress }: {
   conversation: ConversationSummary;
+  pinned?: boolean;
   onPress: () => void;
   onLongPress: () => void;
 }) {
@@ -64,7 +66,8 @@ function ConversationRow({ conversation, onPress, onLongPress }: {
   return (
     <Touchable
       accessibilityRole="button"
-      accessibilityLabel={`${conversation.title}. ${
+      accessibilityLabel={`${pinned ? "★ " : ""}
+            {conversation.title}. ${
         activityLabel ? `${activityLabel}. ` : ""
       }${relativeTime(conversation.lastMessageAt)}`}
       onPress={onPress}
@@ -98,6 +101,7 @@ export default function ConversationsScreen() {
   const { activeProfile } = useProfiles();
 
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
+  const [pinned, setPinned] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -115,6 +119,7 @@ export default function ConversationsScreen() {
       const page = await listConversations({ profile: activeProfile, secret }, agentId, { limit: PAGE_SIZE });
       loadedAt.current = Date.now();
       setConversations(page);
+      if (agentId) void loadPinned(pinnedConversationsKey(agentId)).then(setPinned);
       setHasMore(page.length === PAGE_SIZE);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load conversations.");
@@ -220,6 +225,13 @@ export default function ConversationsScreen() {
   const showActions = (conversation: ConversationSummary) => {
     const deletable = activeProfile ? canDeleteConversations({ profile: activeProfile, secret: "" }) : false;
     Alert.alert(conversation.title, undefined, [
+      {
+        text: pinned.has(conversation.id) ? "Unpin" : "Pin to top",
+        onPress: () => {
+          if (!agentId) return;
+          void togglePinned(pinnedConversationsKey(agentId), conversation.id).then(setPinned);
+        },
+      },
       { text: "Rename", onPress: () => openRename(conversation) },
       // Remote app-servers have no delete command — don't offer what can't work.
       ...(deletable
@@ -229,8 +241,9 @@ export default function ConversationsScreen() {
     ]);
   };
 
-  const filtered = (conversations ?? []).filter((c) =>
-    c.title.toLowerCase().includes(search.trim().toLowerCase()),
+  const filtered = pinFirst(
+    (conversations ?? []).filter((c) => c.title.toLowerCase().includes(search.trim().toLowerCase())),
+    pinned,
   );
 
   return (
@@ -274,6 +287,7 @@ export default function ConversationsScreen() {
             <ConversationRow
               conversation={item}
               onPress={() => openChat(item)}
+              pinned={pinned.has(item.id)}
               onLongPress={() => showActions(item)}
             />
           )}

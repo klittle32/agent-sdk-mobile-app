@@ -6,12 +6,14 @@
  * test-connection flow arrive in milestone 3.
  */
 import { router } from "expo-router";
+import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 
 import { Screen } from "../components/ui/Screen";
 import { StatusDot } from "../components/ui/StatusDot";
 import { Text } from "../components/ui/Text";
 import { Touchable } from "../components/ui/Touchable";
+import { loadPinned, pinFirst, PINNED_PROFILES_KEY, togglePinned } from "../lib/favorites";
 import { useProfiles } from "../lib/profiles/ProfilesContext";
 import { Bloop } from "../components/ui/Bloop";
 import { useTheme } from "../theme/ThemeProvider";
@@ -64,6 +66,10 @@ function ModeCard({
 }
 
 export default function ConnectScreen() {
+  const [pinnedProfiles, setPinnedProfiles] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    void loadPinned(PINNED_PROFILES_KEY).then(setPinnedProfiles);
+  }, []);
   const { colors } = useTheme();
   const { profiles, activeProfile, setActive } = useProfiles();
   return (
@@ -103,7 +109,7 @@ export default function ConnectScreen() {
               Connections you save appear here.
             </Text>
           ) : (
-            profiles.map((profile) => (
+            pinFirst(profiles, pinnedProfiles).map((profile) => (
               <Touchable
                 key={profile.id}
                 accessibilityRole="button"
@@ -121,7 +127,7 @@ export default function ConnectScreen() {
                 <View style={styles.profileInner}>
                   <StatusDot tone={profile.lastTest === "ok" ? "run" : profile.lastTest ? "danger" : "idle"} />
                   <View style={styles.profileText}>
-                    <Text role="bodyEm">{profile.name}</Text>
+                    <Text role="bodyEm">{pinnedProfiles.has(profile.id) ? "★ " : ""}{profile.name}</Text>
                     <Text role="sub" ink={3}>
                       {profile.type === "cloud"
                         ? `Letta Cloud · ${profile.authMethod === "oauth" ? "signed in" : "API key"}`
@@ -129,9 +135,15 @@ export default function ConnectScreen() {
                       {activeProfile?.id === profile.id ? " · active" : ""}
                     </Text>
                   </View>
-                  <Text role="title" ink={3}>
-                    ›
-                  </Text>
+                  <Touchable
+                    accessibilityRole="button"
+                    accessibilityLabel={pinnedProfiles.has(profile.id) ? `Unpin ${profile.name}` : `Pin ${profile.name}`}
+                    onPress={() => void togglePinned(PINNED_PROFILES_KEY, profile.id).then(setPinnedProfiles)}
+                  >
+                    <Text role="title" ink={pinnedProfiles.has(profile.id) ? 1 : 3}>
+                      {pinnedProfiles.has(profile.id) ? "★" : "☆"}
+                    </Text>
+                  </Touchable>
                 </View>
               </Touchable>
             ))
