@@ -4,7 +4,7 @@
  * creation goes through the Agent SDK client (docs/design-doc.md §4.2,
  * Appendix A).
  */
-import type { BottomSheetModal } from "@gorhom/bottom-sheet";
+import { BottomSheetTextInput, type BottomSheetModal } from "@gorhom/bottom-sheet";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Image } from "expo-image";
@@ -331,7 +331,7 @@ export default function AgentsScreen() {
       )}
 
       <Sheet ref={sheetRef} title={editing ? "Rename agent" : "New agent"}>
-        <TextInput
+        <BottomSheetTextInput
           value={draftName}
           onChangeText={setDraftName}
           placeholder="Agent name"

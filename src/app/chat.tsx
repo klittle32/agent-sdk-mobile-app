@@ -4,7 +4,7 @@
  * stays enabled during a run (sends become queued follow-ups, server-
  * confirmed); the send button morphs into stop.
  */
-import type { BottomSheetModal } from "@gorhom/bottom-sheet";
+import { BottomSheetTextInput, type BottomSheetModal } from "@gorhom/bottom-sheet";
 import { setStringAsync as copyToClipboard } from "expo-clipboard";
 import { router, useLocalSearchParams } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -843,7 +843,7 @@ export default function ChatScreen() {
       </Sheet>
       <ToolDetailSheet ref={toolSheetRef} tool={detailTool} />
       <Sheet ref={settingsSheetRef} title="Conversation" scroll>
-        <TextInput
+        <BottomSheetTextInput
           value={settingsTitle}
           onChangeText={setSettingsTitle}
           placeholder="Conversation title"

@@ -3,9 +3,9 @@
  * with mono handles, and an effort segment. Saving state stays on the chip
  * until the server confirms; failures revert with an inline error.
  */
-import type { BottomSheetModal } from "@gorhom/bottom-sheet";
+import { BottomSheetTextInput, type BottomSheetModal } from "@gorhom/bottom-sheet";
 import { forwardRef, useEffect, useState } from "react";
-import { StyleSheet, TextInput, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import type { ModelOption, ReasoningEffort } from "../../lib/letta/api";
 import { loadFavoriteModels, loadRecentModels, pushRecentModel, toggleFavoriteModel } from "../../lib/modelPrefs";
@@ -94,7 +94,7 @@ export const ModelSheet = forwardRef<BottomSheetModal, Props>(function ModelShee
 
   return (
     <Sheet ref={ref} title="Model">
-      <TextInput
+      <BottomSheetTextInput
         value={search}
         onChangeText={setSearch}
         placeholder="Search models…"

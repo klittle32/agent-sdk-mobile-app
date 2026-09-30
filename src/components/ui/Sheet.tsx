@@ -35,6 +35,7 @@ export const Sheet = forwardRef<BottomSheetModal, Props>(function Sheet({ title,
       ref={ref}
       enableDynamicSizing
       enablePanDownToClose
+      keyboardBlurBehavior="restore"
       backdropComponent={renderBackdrop}
       backgroundStyle={{ backgroundColor: colors.surface, borderRadius: radius.sheet }}
       handleIndicatorStyle={{ backgroundColor: colors.ink3, width: 36 }}
