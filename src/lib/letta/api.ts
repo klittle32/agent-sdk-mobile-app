@@ -18,6 +18,7 @@ import type {
 } from "@letta-ai/letta-agent-sdk/client";
 
 import { CLOUD_DEFAULT_URL, type Profile } from "../profiles/profiles";
+import { runningIdsFromRuns, type RunActivity } from "./runActivity";
 import { OAuthTokenError } from "../auth/oauthTokens";
 
 // Re-exported so UI code imports from the app's data module, but the
@@ -265,6 +266,23 @@ export async function listConversations(
     ...(opts.before ? { after: opts.before } : {}),
   });
   return records.map(toConversation);
+}
+
+/**
+ * One unfiltered sweep of recent runs — the in-progress signal for the
+ * conversation list. A single request, not one per conversation. Remote
+ * profiles have no equivalent list, so they get an empty result.
+ */
+export async function fetchRunActivity(conn: Connection): Promise<RunActivity> {
+  if (conn.profile.type !== "cloud") {
+    return { runningAgents: new Set(), runningConversations: new Set() };
+  }
+  try {
+    return runningIdsFromRuns(await cloudFetch(conn, "/v1/runs?limit=50"));
+  } catch {
+    // A missed poll is not a list failure. The next tick retries.
+    return { runningAgents: new Set(), runningConversations: new Set() };
+  }
 }
 
 export async function createConversation(conn: Connection, agentId: string): Promise<string> {

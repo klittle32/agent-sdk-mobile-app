@@ -6,7 +6,7 @@
 import { BottomSheetTextInput, type BottomSheetModal } from "@gorhom/bottom-sheet";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Alert, FlatList, RefreshControl, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, TextInput, View } from "react-native";
 
 import { EmptyState } from "../components/ui/EmptyState";
 import { Header, Screen } from "../components/ui/Screen";
@@ -19,6 +19,7 @@ import {
   canDeleteConversations,
   createConversation,
   deleteConversation,
+  fetchRunActivity,
   listConversations,
   renameConversation,
   type ConversationSummary,
@@ -53,8 +54,9 @@ function useActivity(conversationId: string): ConversationActivity | null {
   return useSyncExternalStore(subscribeConversationActivity, read);
 }
 
-function ConversationRow({ conversation, pinned, onPress, onLongPress }: {
+function ConversationRow({ conversation, running, pinned, onPress, onLongPress }: {
   conversation: ConversationSummary;
+  running?: boolean;
   pinned?: boolean;
   onPress: () => void;
   onLongPress: () => void;
@@ -63,12 +65,12 @@ function ConversationRow({ conversation, pinned, onPress, onLongPress }: {
   const activity = useActivity(conversation.id);
   const activityLabel =
     activity === "awaiting_approval" ? "needs approval" : activity === "running" ? "running" : null;
+  const inProgress = running || activity === "running";
   return (
     <Touchable
       accessibilityRole="button"
-      accessibilityLabel={`${pinned ? "★ " : ""}
-            {conversation.title}. ${
-        activityLabel ? `${activityLabel}. ` : ""
+      accessibilityLabel={`${conversation.title}. ${
+        inProgress ? "working. " : activityLabel ? `${activityLabel}. ` : ""
       }${relativeTime(conversation.lastMessageAt)}`}
       onPress={onPress}
       onLongPress={onLongPress}
@@ -78,11 +80,21 @@ function ConversationRow({ conversation, pinned, onPress, onLongPress }: {
       <View style={styles.rowInner}>
         <View style={styles.rowText}>
           <Text role="bodyEm" numberOfLines={1}>
+            {pinned ? "★ " : ""}
             {conversation.title}
           </Text>
-          <Text role="sub" ink={3}>
-            {activityLabel ?? relativeTime(conversation.lastMessageAt)}
-          </Text>
+          {inProgress ? (
+            <View style={styles.runningRow}>
+              <ActivityIndicator size="small" color={colors.accent} />
+              <Text role="sub" ink={2} numberOfLines={1}>
+                {activityLabel ?? "working…"}
+              </Text>
+            </View>
+          ) : (
+            <Text role="sub" ink={3}>
+              {activityLabel ?? relativeTime(conversation.lastMessageAt)}
+            </Text>
+          )}
         </View>
         {activity ? (
           <StatusDot tone={activity === "awaiting_approval" ? "wait" : "run"} />
@@ -102,6 +114,7 @@ export default function ConversationsScreen() {
 
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
   const [pinned, setPinned] = useState<Set<string>>(new Set());
+  const [runningConvs, setRunningConvs] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -131,6 +144,24 @@ export default function ConversationsScreen() {
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
   }, [load]);
+
+  // Runs are transient, so the list asks once and then on a slow cadence.
+  // One request covers every conversation. A remote profile has no run list.
+  useEffect(() => {
+    if (!activeProfile || activeProfile.type !== "cloud") return;
+    let cancelled = false;
+    const refresh = async () => {
+      const secret = (await getSecret(activeProfile.id)) ?? "";
+      const activity = await fetchRunActivity({ profile: activeProfile, secret });
+      if (!cancelled) setRunningConvs(activity.runningConversations);
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeProfile]);
 
   // Coming back from a chat, the list is stale: titles get auto-summarized and
   // a new conversation may exist. Refetch on focus, but not on every quick
@@ -287,6 +318,7 @@ export default function ConversationsScreen() {
             <ConversationRow
               conversation={item}
               onPress={() => openChat(item)}
+              running={runningConvs.has(item.id)}
               pinned={pinned.has(item.id)}
               onLongPress={() => showActions(item)}
             />
@@ -358,6 +390,7 @@ const styles = StyleSheet.create({
   row: { paddingHorizontal: space.gutter },
   rowInner: { flexDirection: "row", alignItems: "center", paddingVertical: 14 },
   rowText: { flex: 1, gap: 2 },
+  runningRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   divider: { height: StyleSheet.hairlineWidth },
   add: { paddingHorizontal: space.sm },
   footer: { textAlign: "center", paddingVertical: space.md },
