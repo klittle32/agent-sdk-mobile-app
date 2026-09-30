@@ -22,7 +22,7 @@ import { createTranscriptAccumulator } from "@letta-ai/letta-agent-sdk/client";
 import { toImageContent, type Attachment } from "./attachments";
 import type { Profile } from "../profiles/profiles";
 import { getConversationModel, isAuthError, listComputers, listConversationMessages, sdkClient } from "./api";
-import { computerForSession } from "./computerRouting";
+import { sessionRoute } from "./computerRouting";
 import { ExternalTranscriptStore } from "./ExternalTranscriptStore";
 import { emptyChat, type ApprovalRequest, type ChatSnapshot, type PermissionMode, type ToolStatus, type TranscriptItem } from "./model";
 import { patch } from "./mockSession";
@@ -160,12 +160,12 @@ export class ChatSession {
     // A saved computer is resolved to a current online lease. Offline or
     // unknown falls back to the SDK sandbox rather than failing the send.
     // Pass `computer`, not the deprecated `environment` option.
-    const computer =
+    const route =
       this.conn.profile.type === "cloud"
-        ? computerForSession(this.conn.profile.computer, await listComputers(this.conn).catch(() => []))
-        : undefined;
+        ? sessionRoute(this.conn.profile.computer, await listComputers(this.conn).catch(() => []))
+        : {};
     this.session = client.resumeSession(this.conversationId, {
-      ...(computer ? { computer } : {}),
+      ...route,
       // Tool approvals surface as an ApprovalRequest in the snapshot; the
       // ApprovalCard resolves it via resolveApproval(). The run stays in
       // awaiting_approval until the user decides.

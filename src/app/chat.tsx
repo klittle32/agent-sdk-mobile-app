@@ -379,7 +379,26 @@ export default function ChatScreen() {
     async (computer: { deviceId: string; name: string } | null) => {
       if (!activeProfile) return;
       const secret = await getSecret(activeProfile.id);
-      await saveProfile({ ...activeProfile, computer: computer ?? undefined }, secret);
+      const previous = activeProfile.computer;
+      const cwd = computer && previous?.deviceId === computer.deviceId ? previous.cwd : undefined;
+      await saveProfile(
+        { ...activeProfile, computer: computer ? { ...computer, ...(cwd ? { cwd } : {}) } : undefined },
+        secret,
+      );
+      await refreshProfiles();
+    },
+    [activeProfile, refreshProfiles],
+  );
+
+  const setDirectory = useCallback(
+    async (directory: string) => {
+      if (!activeProfile?.computer) return;
+      const secret = await getSecret(activeProfile.id);
+      const cwd = directory.trim();
+      await saveProfile(
+        { ...activeProfile, computer: { ...activeProfile.computer, ...(cwd ? { cwd } : { cwd: undefined }) } },
+        secret,
+      );
       await refreshProfiles();
     },
     [activeProfile, refreshProfiles],
@@ -895,7 +914,9 @@ export default function ChatScreen() {
         ref={envSheetRef}
         computers={computers}
         selectedDeviceId={activeProfile?.computer?.deviceId ?? null}
+        directory={activeProfile?.computer?.cwd ?? ""}
         onSelect={(computer) => void selectEnvironment(computer)}
+        onSetDirectory={(directory) => void setDirectory(directory)}
         loading={envLoading}
         error={envError}
       />
