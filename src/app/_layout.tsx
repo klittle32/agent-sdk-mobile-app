@@ -7,6 +7,7 @@ import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import { ProfilesProvider } from "../lib/profiles/ProfilesContext";
 import { ThemeProvider, useTheme } from "../theme/ThemeProvider";
@@ -30,6 +31,7 @@ function ThemedStack() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardProvider>
       <ThemeProvider>
         <ProfilesProvider>
           <BottomSheetModalProvider>
@@ -37,6 +39,7 @@ export default function RootLayout() {
           </BottomSheetModalProvider>
         </ProfilesProvider>
       </ThemeProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

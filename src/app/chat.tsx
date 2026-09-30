@@ -13,7 +13,6 @@ import {
   ActivityIndicator,
   AppState,
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   TextInput,
@@ -21,6 +20,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { KeyboardAvoidingView, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ApprovalCard } from "../components/chat/ApprovalCard";
@@ -129,6 +129,11 @@ export default function ChatScreen() {
 
   const sessionRef = useRef<ChatSession | null>(null);
   const listRef = useRef<FlatList<TranscriptRowItem>>(null);
+  const { progress: keyboardProgress } = useReanimatedKeyboardAnimation();
+  const composerPad = useAnimatedStyle(() => ({
+    // Home-indicator inset while closed; it collapses as the keyboard covers it.
+    paddingBottom: space.md + Math.max(insets.bottom - space.md, 0) * (1 - keyboardProgress.value),
+  }));
   const [snapshot, setSnapshot] = useState<ChatSnapshot>({ ...emptyChat, hydrating: true });
   const [draft, setDraft] = useState("");
   // The nav param is only the title as it was when this screen was opened; a
@@ -533,7 +538,7 @@ export default function ChatScreen() {
           </View>
         }
       />
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
+      <KeyboardAvoidingView behavior="padding" style={styles.flex}>
         <View style={styles.flex}>
           {snapshot.hydrating ? (
             <SkeletonList rows={4} avatar={false} />
@@ -618,10 +623,11 @@ export default function ChatScreen() {
           ) : null}
         </View>
 
-        <View
+        <Animated.View
           style={[
             styles.composerWrap,
-            { borderColor: colors.surfaceEdge, paddingBottom: Math.max(insets.bottom, space.md) },
+            composerPad,
+            { backgroundColor: colors.bg, borderColor: colors.surfaceEdge },
           ]}
         >
           {snapshot.connection !== "connected" ? (
@@ -687,6 +693,7 @@ export default function ChatScreen() {
               </Text>
             </Touchable>
             <TextInput
+              nativeID="chat-input"
               value={draft}
               onChangeText={editDraft}
               placeholder={running ? "Add a follow-up…" : `Message ${agentName}…`}
@@ -771,7 +778,7 @@ export default function ChatScreen() {
               </Animated.View>
             </Touchable>
           </View>
-        </View>
+      </Animated.View>
       </KeyboardAvoidingView>
       <QueueSheet
         ref={queueSheetRef}
