@@ -7,13 +7,14 @@
  */
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, View } from "react-native";
 
 import { Screen } from "../components/ui/Screen";
 import { StatusDot } from "../components/ui/StatusDot";
 import { Text } from "../components/ui/Text";
 import { Touchable } from "../components/ui/Touchable";
 import { loadPinned, pinFirst, PINNED_PROFILES_KEY, togglePinned } from "../lib/favorites";
+import { deleteProfile } from "../lib/profiles/profiles";
 import { useProfiles } from "../lib/profiles/ProfilesContext";
 import { Bloop } from "../components/ui/Bloop";
 import { useTheme } from "../theme/ThemeProvider";
@@ -71,7 +72,7 @@ export default function ConnectScreen() {
     void loadPinned(PINNED_PROFILES_KEY).then(setPinnedProfiles);
   }, []);
   const { colors } = useTheme();
-  const { profiles, activeProfile, setActive } = useProfiles();
+  const { profiles, activeProfile, setActive, refresh } = useProfiles();
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -119,7 +120,30 @@ export default function ConnectScreen() {
                   router.push("/agents");
                 }}
                 onLongPress={() =>
-                  router.push({ pathname: "/profile", params: { id: profile.id } })
+                  Alert.alert(profile.name, "Edit or remove this saved connection.", [
+                    {
+                      text: "Edit",
+                      onPress: () => router.push({ pathname: "/profile", params: { id: profile.id } }),
+                    },
+                    {
+                      text: "Remove",
+                      style: "destructive",
+                      onPress: () =>
+                        Alert.alert(
+                          "Remove connection?",
+                          "This signs that connection out on this phone. It does not delete your Letta account.",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Remove",
+                              style: "destructive",
+                              onPress: () => void deleteProfile(profile.id).then(() => refresh()),
+                            },
+                          ],
+                        ),
+                    },
+                    { text: "Cancel", style: "cancel" },
+                  ])
                 }
                 scaleOnPress={false}
                 style={styles.profileRow}
@@ -150,7 +174,7 @@ export default function ConnectScreen() {
           )}
           {profiles.length > 0 ? (
             <Text role="sub" ink={3}>
-              Long-press a connection to edit it.
+              Long-press a connection to edit or remove it.
             </Text>
           ) : null}
         </View>

@@ -5,6 +5,7 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -21,6 +22,7 @@ import { OAuthCancelledError, signInWithLetta } from "../lib/auth/oauth";
 import { testConnection, type TestResult } from "../lib/letta/testConnection";
 import {
   CLOUD_DEFAULT_URL,
+  deleteProfile,
   hasSecret,
   newProfileId,
   saveOAuthProfile,
@@ -421,6 +423,35 @@ export default function ProfileEditorScreen() {
               ) : null}
             </>
           )}
+          {existing ? (
+            <Touchable
+              accessibilityRole="button"
+              accessibilityLabel="Remove connection"
+              onPress={() =>
+                Alert.alert(
+                  "Remove connection?",
+                  "This signs that connection out on this phone. It does not delete your Letta account.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Remove",
+                      style: "destructive",
+                      onPress: () =>
+                        void deleteProfile(existing.id).then(async () => {
+                          await refresh();
+                          router.back();
+                        }),
+                    },
+                  ],
+                )
+              }
+              style={styles.remove}
+            >
+              <Text role="bodyEm" tone="danger" style={styles.actionLabel}>
+                Remove connection
+              </Text>
+            </Touchable>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>
@@ -472,6 +503,7 @@ const styles = StyleSheet.create({
   primaryLabel: { color: "#FFFFFF", paddingVertical: 14 },
   centeredText: { textAlign: "center" },
   actions: { flexDirection: "row", gap: space.md, paddingTop: space.sm },
+  remove: { minHeight: 46, alignItems: "center", justifyContent: "center" },
   test: {
     flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
